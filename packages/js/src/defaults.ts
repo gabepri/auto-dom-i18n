@@ -19,6 +19,9 @@ export const DEFAULT_IGNORE_SELECTORS: string[] = [
   'com-1password-button',
   'com-1password-menu',
   'com-1password-notification',
+  // Its live region (id="1p-menu-live-region") sits outside those elements, so match the
+  // vendor's id prefix. Attribute form, not `#1p-…`: an id selector can't start with a digit.
+  '[id^="1p-"]',
   // LastPass field decorations
   '[id^="__lpform"]',
   // Grammarly's editor overlay and desktop integration host

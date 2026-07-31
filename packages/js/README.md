@@ -162,6 +162,8 @@ import { I18nObserver, DEFAULT_IGNORE_SELECTORS } from 'auto-html-i18n';
 
 `DEFAULT_IGNORE_SELECTORS` covers the obvious non-copy elements (`script`, `style`, `code`) **and** the containers browser extensions inject into your page — 1Password, LastPass and Grammarly. Extension UI is localized to the *user's* language and is never your copy, so without this it gets collected and reported as missing source text. This list grows as new extensions are observed in production, which is exactly why the plain-array form inherits rather than replaces.
 
+Every extension entry names its vendor — by tag or by id prefix — so none of them can match your own markup by accident. An extension that reaches the page through an ordinary element gets an id-prefix entry rather than a structural one: 1Password's autofill hint, for instance, arrives in `<div id="1p-menu-live-region" aria-live="polite">`, which sits outside the `com-1password-*` elements and is covered by `[id^="1p-"]`.
+
 ### The `onMissingTranslation` Item Object
 
 The `items` array passed to your callback contains objects with this structure:

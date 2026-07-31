@@ -73,6 +73,7 @@ describe('DEFAULT_IGNORE_SELECTORS', () => {
         'com-1password-button',
         'com-1password-menu',
         'com-1password-notification',
+        '[id^="1p-"]',
         '[id^="__lpform"]',
         'grammarly-extension',
         'grammarly-desktop-integration',
@@ -175,5 +176,47 @@ describe('ignoreSelectors list-option convention', () => {
     expect(menu.hasAttribute('data-i18n-pending')).toBe(false);
     expect(menu.textContent).toBe('1Passwordメニューが利用できます。');
     i18n.stop();
+  });
+
+  // Every extension entry names its vendor — a tag or an id prefix — and none matches by
+  // shape (`[aria-live]`, `[role=status]`). Worth pinning, because a shape rule is the
+  // tempting fix the next time an announcer turns up, and it fails in the one direction
+  // nobody sees: the text still reaches screen readers, just never translated. These are
+  // the two halves of that decision.
+  describe('extension entries match by vendor, never by shape', () => {
+    // 1Password's autofill hint arrives in a live region that is NOT a descendant of the
+    // com-1password-* elements, so it takes an entry of its own. Present before start()
+    // so this asserts the selector, not when the observer happens to see an added node.
+    it('ignores 1Password\'s announcer, matched on its vendor id prefix', async () => {
+      root.innerHTML =
+        '<p>Page text</p><div id="1p-menu-live-region" aria-live="polite">1Passwordメニューが利用できます。</div>';
+      const i18n = observe();
+      i18n.start();
+      await flushDebounce();
+
+      expect(reported(onMissing)).toEqual(['Page text']);
+      // Located by exact id, not by the `[id^="1p-"]` selector under test.
+      expect(root.querySelector('[id="1p-menu-live-region"]')?.textContent)
+        .toBe('1Passwordメニューが利用できます。');
+      i18n.stop();
+    });
+
+    it('never ignores an app\'s own live region, which is ordinary copy', async () => {
+      // Same markup shape, no vendor id — a screen reader reads this aloud, so it has to
+      // be translated like any other text. Fails the moment a bare `[aria-live]` (or any
+      // other shape rule that catches it) is added to the defaults.
+      root.innerHTML = '<div aria-live="polite">Saved</div>';
+      const i18n = new I18nObserver({
+        locale: 'es',
+        onMissingTranslation: onMissing as never,
+        rootElement: root,
+        initialCache: { 'Saved': 'Guardado' },
+      });
+      i18n.start();
+      await flushDebounce();
+
+      expect(root.querySelector('[aria-live]')?.textContent).toBe('Guardado');
+      i18n.stop();
+    });
   });
 });
