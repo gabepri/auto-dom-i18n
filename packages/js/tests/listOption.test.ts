@@ -149,11 +149,18 @@ describe('ignoreSelectors list-option convention', () => {
   });
 
   it('omitting ignoreSelectors entirely still yields the full default list', async () => {
+    // One element per entry in DEFAULT_IGNORE_SELECTORS: a selector absent from this
+    // markup is a selector nothing behavioral is pinning.
     root.innerHTML =
       '<code>Code text</code><style>Style text</style><script>Script text</script>' +
       '<grammarly-extension>Grammarly text</grammarly-extension>' +
+      '<grammarly-desktop-integration>Grammarly desktop text</grammarly-desktop-integration>' +
       '<div id="__lpform_x">LastPass text</div>' +
-      '<com-1password-button>1P text</com-1password-button><p>Page text</p>';
+      '<div id="1p-menu-live-region">1P announcer text</div>' +
+      '<com-1password-button>1P button text</com-1password-button>' +
+      '<com-1password-menu>1P menu text</com-1password-menu>' +
+      '<com-1password-notification>1P notification text</com-1password-notification>' +
+      '<p>Page text</p>';
     const i18n = observe();
     i18n.start();
     await flushDebounce();
@@ -162,16 +169,18 @@ describe('ignoreSelectors list-option convention', () => {
     i18n.stop();
   });
 
-  it('never collects or reports text inside an injected com-1password-menu element', async () => {
-    root.innerHTML = '<p>Page text</p>';
+  // Built before start() on purpose. Appending after start() and awaiting flushDebounce()
+  // does not reliably collect the node under fake timers, which made an earlier version of
+  // this test pass with 'com-1password-menu' deleted from the defaults — it was asserting
+  // that an uncollected node goes unreported, which is true of any node.
+  it('never collects or reports text inside a com-1password-menu element', async () => {
+    root.innerHTML =
+      '<p>Page text</p><com-1password-menu>1Passwordメニューが利用できます。</com-1password-menu>';
     const i18n = observe();
     i18n.start();
-
-    const menu = document.createElement('com-1password-menu');
-    menu.textContent = '1Passwordメニューが利用できます。';
-    root.appendChild(menu);
     await flushDebounce();
 
+    const menu = root.querySelector('com-1password-menu')!;
     expect(reported(onMissing)).toEqual(['Page text']);
     expect(menu.hasAttribute('data-i18n-pending')).toBe(false);
     expect(menu.textContent).toBe('1Passwordメニューが利用できます。');
