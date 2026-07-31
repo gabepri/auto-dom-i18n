@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { I18nObserver } from '../src/I18nObserver';
-import type { I18nConfig } from '../src/types';
+import type { I18nConfig, TranslationItem } from '../src/types';
 
 function createConfig(overrides: Partial<I18nConfig> = {}): I18nConfig {
   return {
@@ -665,6 +665,111 @@ describe('I18nObserver', () => {
         expect(root.querySelector('p')?.textContent).toBe('Hola Alice');
 
         i18n.stop();
+      });
+    });
+
+    // The Translator's value-based echo guard indexes each output it writes under that
+    // output's *masked* form, so it can recognize its own translation when a framework
+    // tears the node down and re-creates it. Masking is ignore-word-dependent, so every
+    // mutator here invalidates those keys: left stale, the guard misses and reports our
+    // own Spanish back as fresh English source, minting a target-language cache row.
+    // Consumers hit this whenever ignore words arrive after the first translations land
+    // (an employer or member name registered once the profile request resolves).
+    //
+    // These drive the public API rather than Translator.reindexAppliedOutputs() directly:
+    // the wiring in each mutator is the thing that can regress.
+    describe('echo guard re-keying across ignore-word changes', () => {
+      /**
+       * Renders `source`, waits for it to translate, then mutates the ignore-word set and
+       * simulates a framework swapping the node for a fresh one carrying our own output.
+       * Returns the replacement node and everything reported after the mutation.
+       */
+      async function translateThenSwapNode(
+        i18n: I18nObserver,
+        onMissing: ReturnType<typeof vi.fn>,
+        source: string,
+        output: string,
+        mutateIgnoreWords: () => void
+      ) {
+        root.innerHTML = `<p>${source}</p>`;
+        i18n.start();
+        expect(root.querySelector('p')?.textContent).toBe(output);
+        onMissing.mockClear();
+
+        mutateIgnoreWords();
+        await new Promise(r => setTimeout(r, 0));
+        onMissing.mockClear();
+
+        root.querySelector('p')?.remove();
+        const replacement = document.createElement('p');
+        replacement.textContent = output;
+        root.appendChild(replacement);
+        await new Promise(r => setTimeout(r, 20));
+
+        const reported = onMissing.mock.calls.flatMap(
+          (call: unknown[]) => (call[0] as TranslationItem[]).map(item => item.original)
+        );
+        i18n.stop();
+        return { replacement, reported };
+      }
+
+      it('addIgnoreWords(): still recognizes its own output after a word is added', async () => {
+        const onMissing = vi.fn().mockResolvedValue(null);
+        const i18n = new I18nObserver(createConfig({
+          initialCache: { 'Welcome to Acme': 'Bienvenido a Acme' },
+          onMissingTranslation: onMissing,
+          rootElement: root,
+          debounceTime: 0,
+        }));
+
+        // 'Bienvenido a Acme' was indexed under itself; with 'Acme' ignored it masks
+        // to 'Bienvenido a {{0}}' instead.
+        const { replacement, reported } = await translateThenSwapNode(
+          i18n, onMissing, 'Welcome to Acme', 'Bienvenido a Acme',
+          () => i18n.addIgnoreWords('Acme')
+        );
+
+        expect(reported).not.toContain('Bienvenido a Acme');
+        expect(replacement.getAttribute('data-i18n-original')).toBe('Welcome to Acme');
+      });
+
+      it('removeIgnoreWords(): still recognizes its own output after a word is removed', async () => {
+        const onMissing = vi.fn().mockResolvedValue(null);
+        const i18n = new I18nObserver(createConfig({
+          ignoreWords: ['Acme'],
+          initialCache: { 'Welcome to {{0}}': 'Bienvenido a {{0}}' },
+          onMissingTranslation: onMissing,
+          rootElement: root,
+          debounceTime: 0,
+        }));
+
+        // The reverse direction: the key loses its variable and becomes concrete again.
+        const { replacement, reported } = await translateThenSwapNode(
+          i18n, onMissing, 'Welcome to Acme', 'Bienvenido a Acme',
+          () => i18n.removeIgnoreWords('Acme')
+        );
+
+        expect(reported).not.toContain('Bienvenido a Acme');
+        expect(replacement.getAttribute('data-i18n-original')).toBe('Welcome to Acme');
+      });
+
+      it('setIgnoreWords(): still recognizes its own output after the set is replaced', async () => {
+        const onMissing = vi.fn().mockResolvedValue(null);
+        const i18n = new I18nObserver(createConfig({
+          ignoreWords: ['Acme'],
+          initialCache: { 'Welcome to {{0}}': 'Bienvenido a {{0}}' },
+          onMissingTranslation: onMissing,
+          rootElement: root,
+          debounceTime: 0,
+        }));
+
+        const { replacement, reported } = await translateThenSwapNode(
+          i18n, onMissing, 'Welcome to Acme', 'Bienvenido a Acme',
+          () => i18n.setIgnoreWords(['Globex'])
+        );
+
+        expect(reported).not.toContain('Bienvenido a Acme');
+        expect(replacement.getAttribute('data-i18n-original')).toBe('Welcome to Acme');
       });
     });
   });

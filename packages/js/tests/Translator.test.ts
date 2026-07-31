@@ -2322,6 +2322,38 @@ describe('Translator', () => {
       expect(p2.getAttribute('data-i18n-original')).toBe('Notification');
     });
 
+    // Unit-level contract for reindexAppliedOutputs: after it runs, an output recorded
+    // under the old masking is found under the new one. The regression tests that prove
+    // the mutators actually call it live in I18nObserver.test.ts ("echo guard re-keying
+    // across ignore-word changes") — this one calls it directly and would keep passing
+    // if every call site were deleted.
+    it('reindexAppliedOutputs() re-keys a recorded output under the new ignore-word set', () => {
+      const { translator, store, queue, masker } = createDeps();
+      const enqueueSpy = vi.spyOn(queue, 'enqueue');
+      store.set('es', 'Welcome to Acme', 'Bienvenido a Acme');
+
+      const p1 = document.createElement('p');
+      p1.textContent = 'Welcome to Acme';
+      root.appendChild(p1);
+      translator.processText(p1, 'Welcome to Acme');
+      expect(p1.textContent).toBe('Bienvenido a Acme');
+      enqueueSpy.mockClear();
+
+      // The employer name arrives once the profile loads. 'Bienvenido a Acme' now
+      // masks to 'Bienvenido a {{0}}' — a different key than the one recorded above.
+      masker.addIgnoreWords('Acme');
+      translator.reindexAppliedOutputs();
+
+      root.removeChild(p1);
+      const p2 = document.createElement('p');
+      p2.textContent = 'Bienvenido a Acme';
+      root.appendChild(p2);
+      translator.processText(p2, 'Bienvenido a Acme');
+
+      expect(enqueueSpy).not.toHaveBeenCalled();
+      expect(p2.getAttribute('data-i18n-original')).toBe('Welcome to Acme');
+    });
+
     it('recognizes its own applied attribute output on a framework-recreated node', () => {
       const { translator, store, queue } = createDeps();
       const enqueueSpy = vi.spyOn(queue, 'enqueue');

@@ -35,6 +35,12 @@ import { stripIgnoreSentinels, collectTopLevelIgnored, isIgnoredElement, IGNORED
 // isn't reconcilable and falls back to a wholesale rebuild (see invariant above).
 const ICU_PATTERN = /\{\s*\w+\s*,\s*(?:plural|select|selectordinal)\b/;
 
+/** An output we wrote: lookups read `source`, {@link Translator.reindexAppliedOutputs} `concrete`. */
+interface AppliedOutput {
+  concrete: string;
+  source: string;
+}
+
 export interface TranslatorConfig {
   locale: string;
   originalAttribute: string;
@@ -128,7 +134,7 @@ export class Translator {
   // own translation as its "source" text, we recognize it here and re-establish
   // the marker instead of reporting it as a fresh source string. Keyed by locale
   // so an output for locale A never suppresses reporting under locale B.
-  private appliedOutputs = new Map<string, Map<string, string>>();
+  private appliedOutputs = new Map<string, Map<string, AppliedOutput>>();
   // Canonical serialization / ignore predicate for aggregated elements, injected
   // so the Translator stays free of ignore/root config. Defaults keep behavior
   // identical for callers (e.g. tests) that don't wire them up.
@@ -227,7 +233,7 @@ export class Translator {
     // row). Accepted trade-off: a genuinely new source string that coincidentally
     // equals a prior translation OUTPUT in the active locale is suppressed. Rare,
     // and strongly preferable to leaking target-language rows.
-    const echoedOriginal = this.appliedOutputs.get(this.config.locale)?.get(maskResult.masked);
+    const echoedOriginal = this.appliedOutputs.get(this.config.locale)?.get(maskResult.masked)?.source;
     if (echoedOriginal !== undefined) {
       if (textNode) {
         this.textUnits.set(textNode, { original: echoedOriginal, lastApplied: textNode.data });
@@ -321,7 +327,7 @@ export class Translator {
     // Value-based echo guard (see processText): recognize an attribute value that
     // is our own applied output re-collected on a framework-recreated node, and
     // re-establish its marker instead of reporting it as new source.
-    const echoedOriginal = this.appliedOutputs.get(this.config.locale)?.get(maskResult.masked);
+    const echoedOriginal = this.appliedOutputs.get(this.config.locale)?.get(maskResult.masked)?.source;
     if (echoedOriginal !== undefined) {
       element.setAttribute(originalAttrName, echoedOriginal);
       // `originalValue` is the recognized output currently displayed — record it
@@ -1258,7 +1264,24 @@ export class Translator {
       map = new Map();
       this.appliedOutputs.set(this.config.locale, map);
     }
-    map.set(normalized, sourceOriginal);
+    map.set(normalized, { concrete: concreteOutput, source: sourceOriginal });
+  }
+
+  /**
+   * Re-key every recorded output under the current ignore-word set, which changes how
+   * already-written text masks. Left stale, the guard above misses and reports our own
+   * translation as fresh source — a target-language cache row. Consumers hit this when
+   * ignore words arrive after the first translations land (a name from a late profile
+   * fetch). Collapsing two outputs onto one key is last-wins, as it is on write.
+   */
+  reindexAppliedOutputs(): void {
+    for (const [locale, map] of this.appliedOutputs) {
+      const rekeyed = new Map<string, AppliedOutput>();
+      for (const record of map.values()) {
+        rekeyed.set(this.masker.mask(record.concrete).masked, record);
+      }
+      this.appliedOutputs.set(locale, rekeyed);
+    }
   }
 
   private trackPendingNode(

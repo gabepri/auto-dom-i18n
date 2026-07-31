@@ -371,17 +371,25 @@ export class I18nObserver {
   }
 
   addIgnoreWords(...words: IgnoreWordEntry[]): void {
-    this.masker.addIgnoreWords(...words);
-    this.translator.retranslateAll();
+    this.applyIgnoreWordChange(() => this.masker.addIgnoreWords(...words));
   }
 
   removeIgnoreWords(...words: IgnoreWordEntry[]): void {
-    this.masker.removeIgnoreWords(...words);
-    this.translator.retranslateAll();
+    this.applyIgnoreWordChange(() => this.masker.removeIgnoreWords(...words));
   }
 
   setIgnoreWords(words: IgnoreWordEntry[]): void {
-    this.masker.setIgnoreWords(words);
+    this.applyIgnoreWordChange(() => this.masker.setIgnoreWords(words));
+  }
+
+  /**
+   * The one path an ignore-word change may take, so a fourth mutator can't omit a step:
+   * `mutate` changes how text masks, staling both the page's cache keys and the echo
+   * guard's index keys. See {@link Translator.reindexAppliedOutputs}.
+   */
+  private applyIgnoreWordChange(mutate: () => void): void {
+    mutate();
+    this.translator.reindexAppliedOutputs();
     this.translator.retranslateAll();
   }
 
